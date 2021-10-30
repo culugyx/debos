@@ -190,6 +190,7 @@ type ImagePartitionAction struct {
 	debos.BaseAction `yaml:",inline"`
 	ImageName        string
 	ImageSize        string
+	ImageFormat      string
 	PartitionType    string
 	GptGap           string "gpt_gap"
 	Partitions       []Partition
@@ -288,7 +289,10 @@ func (i *ImagePartitionAction) triggerDeviceNodes(context *debos.DebosContext) e
 func (i ImagePartitionAction) PreMachine(context *debos.DebosContext, m *fakemachine.Machine,
 	args *[]string) error {
 	imagePath := path.Join(context.Artifactdir, i.ImageName)
-	image, err := m.CreateImage(imagePath, i.size)
+	if i.ImageFormat == "" {
+		i.ImageFormat = "raw"
+	}
+	image, err := m.CreateImageWithFormat(imagePath, i.size, i.ImageFormat)
 	if err != nil {
 		return err
 	}
