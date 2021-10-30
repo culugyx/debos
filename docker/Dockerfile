@@ -82,6 +82,7 @@ RUN apt-get update && \
         pkg-config \
         qemu-system-x86 \
         qemu-user-static \
+        qemu-utils \
         rsync \
         systemd \
         systemd-container \
