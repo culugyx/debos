@@ -157,6 +157,7 @@ import (
 	"path"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -198,6 +199,7 @@ type ImagePartitionAction struct {
 	size             int64
 	loopDev          losetup.Device
 	usingLoop        bool
+	usingNbd		 bool
 }
 
 func (p *Partition) UnmarshalYAML(unmarshal func(interface{}) error) error {
@@ -372,24 +374,44 @@ func (i ImagePartitionAction) formatPartition(p *Partition, context debos.DebosC
 
 func (i *ImagePartitionAction) PreNoMachine(context *debos.DebosContext) error {
 	imagePath := path.Join(context.Artifactdir, i.ImageName)
-	img, err := os.OpenFile(imagePath, os.O_WRONLY|os.O_CREATE, 0666)
-	if err != nil {
-		return fmt.Errorf("Couldn't open image file: %v", err)
-	}
+	if i.ImageFormat == "" || i.ImageFormat == "raw" {
+		img, err := os.OpenFile(imagePath, os.O_WRONLY|os.O_CREATE, 0666)
+		if err != nil {
+			return fmt.Errorf("Couldn't open image file: %v", err)
+		}
 
-	err = img.Truncate(i.size)
-	if err != nil {
-		return fmt.Errorf("Couldn't resize image file: %v", err)
-	}
+		err = img.Truncate(i.size)
+		if err != nil {
+			return fmt.Errorf("Couldn't resize image file: %v", err)
+		}
 
-	img.Close()
+		img.Close()
 
-	i.loopDev, err = losetup.Attach(imagePath, 0, false)
-	if err != nil {
-		return fmt.Errorf("Failed to setup loop device")
+		i.loopDev, err = losetup.Attach(imagePath, 0, false)
+		if err != nil {
+			return fmt.Errorf("Failed to setup loop device")
+		}
+		context.Image = i.loopDev.Path()
+		i.usingLoop = true
+	} else if i.ImageFormat == "qcow2" {
+		err := exec.Command("qemu-img", "create", "-f", i.ImageFormat, imagePath, strconv.FormatInt(i.size, 10)).Run()
+		if err != nil {
+			return fmt.Errorf("Couldn't create image file: %v", err)
+		}
+
+		err = exec.Command("modprobe", "nbd").Run()
+		if err != nil {
+			return fmt.Errorf("Couldn't load module nbd: %v", err)
+		}
+		// FIXME: how to determine if nbd0 is in use or not?
+		err = exec.Command("qemu-nbd", "-c", "/dev/nbd0", "-f", i.ImageFormat, imagePath).Run()
+		if err != nil {
+			return fmt.Errorf("Couldn't attach nbd device: %v", err)
+		}
+		i.usingNbd = true
+	} else {
+		return fmt.Errorf("Unsupported image format %s", i.ImageFormat)
 	}
-	context.Image = i.loopDev.Path()
-	i.usingLoop = true
 
 	return nil
 }
@@ -398,8 +420,8 @@ func (i ImagePartitionAction) Run(context *debos.DebosContext) error {
 	i.LogStart()
 
 	/* Exclusively Lock image device file to prevent udev from triggering
-	 * partition rescans, which cause confusion as some time asynchronously the
-	 * partition device might disappear and reappear due to that! */
+	* partition rescans, which cause confusion as some time asynchronously the
+	* partition device might disappear and reappear due to that! */
 	imageFD, err := os.Open(context.Image)
 	if err != nil {
 		return err
@@ -568,6 +590,13 @@ func (i ImagePartitionAction) Cleanup(context *debos.DebosContext) error {
 
 		if err != nil {
 			log.Printf("WARNING: Failed to remove loop device: %s", err)
+			return err
+		}
+	}
+
+	if i.usingNbd {
+		err := exec.Command("qemu-nbd", "-d", "/dev/nbd0").Run()
+		if err != nil {
 			return err
 		}
 	}
