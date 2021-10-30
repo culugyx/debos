@@ -65,7 +65,7 @@ See [docker/README.md](https://github.com/go-debos/debos/blob/master/docker/READ
 ## Installation (under Debian)
 
     sudo apt install golang git libglib2.0-dev libostree-dev qemu-system-x86 \
-         qemu-user-static qemu-utils debootstrap systemd-container
+         qemu-user-static qemu-utils debootstrap systemd-container parted
     export GOPATH=/opt/src/gocode # or whatever suites your needs
     go get -u github.com/go-debos/debos/cmd/debos
     /opt/src/gocode/bin/debos --help
